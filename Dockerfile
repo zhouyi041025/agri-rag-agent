@@ -6,12 +6,20 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/src \
-    PORT=7860
+    PORT=7860 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=180 \
+    PIP_RETRIES=5
 
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+
+# 优先走国内镜像源，失败自动回落官方源，避免构建时拉包超时
+RUN pip install --no-cache-dir -r requirements.txt \
+        -i https://mirrors.aliyun.com/pypi/simple/ \
+        --trusted-host mirrors.aliyun.com \
+    || pip install --no-cache-dir -r requirements.txt
 
 COPY app.py README.md ./
 COPY src/ ./src/
@@ -20,8 +28,5 @@ COPY scripts/ ./scripts/
 COPY eval/ ./eval/
 
 EXPOSE 7860
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PORT','7860')+'/health', timeout=3)"
 
 CMD ["python", "app.py"]
