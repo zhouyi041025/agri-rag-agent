@@ -1,19 +1,7 @@
 ---
-domain:
-# - cv
-tags:
--
-datasets: #关联数据集
-  evaluation:
-  test:
-  train:
-models: #关联模型
-#- iic/ofa_ocr-recognition_general_base_zh
-
-## 启动文件：Gradio/Streamlit SDK 默认 app.py，Static HTML 默认 index.html
+license: Apache License 2.0
 deployspec:
   entry_file: app.py
-license: Apache License 2.0
 ---
 # 荟诊 · 芦荟病虫害智能问答与诊断 Agent
 
