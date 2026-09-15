@@ -185,6 +185,12 @@ class OfflineAgent(BaseAgent):
     _IMAGE_KEYWORDS = ("图片", "照片", "看图", "识别一下", "病斑", "叶片图", "拍了一张", "叶子有斑")
     _ENV_KEYWORDS = ("环境", "温湿度", "墒情", "田间情况", "田间数据", "大棚", "监测点", "实时数据", "传感器", "现在多少")
 
+    # 省略式追问：短句且以指代词/连词开头时，语义依赖上一轮
+    _FOLLOWUP_HINTS = ("那", "这", "它", "该", "此", "上述", "刚才", "那么", "还有", "再", "另外", "顺便")
+    _FOLLOWUP_MAX_LEN = 20
+    # 追问自带领域词的 IDF 占比达到该值，就认为它能独立检索，不必借用上文
+    _DOMAIN_TERM_RATIO = 0.5
+
     # 关键词覆盖率阈值：低于 MIN 直接弃答，低于 CONFIDENT 给出匹配度提示
     MIN_COVERAGE = 0.42
     CONFIDENT_COVERAGE = 0.62
@@ -195,8 +201,9 @@ class OfflineAgent(BaseAgent):
         ledger = CitationLedger()
         steps: list[dict[str, Any]] = []
         text = question.strip()
+        query, borrowed = self._rewrite_query(text, history)
 
-        if self._match(text, self._FORECAST_KEYWORDS):
+        if self._match(query, self._FORECAST_KEYWORDS):
             site = self._site(text)
             result = self._execute("get_forecast", {"site_id": site}, ledger, steps)
             answer = (
@@ -204,8 +211,8 @@ class OfflineAgent(BaseAgent):
                 "施药建议：降雨前后 24 小时内不宜施药；雨后及时排水降湿，并抓住降雨间隙补施保护性杀菌剂。"
             )
 
-        elif self._is_dosage_question(text):
-            answer = self._handle_dosage(text, ledger, steps)
+        elif self._is_dosage_question(query):
+            answer = self._handle_dosage(query, ledger, steps)
 
         elif self._match(text, self._IMAGE_KEYWORDS) or self._IMAGE_RE.search(text):
             match = self._IMAGE_RE.search(text)
@@ -224,7 +231,7 @@ class OfflineAgent(BaseAgent):
                 "3) 发病初期选用保护性杀菌剂，并与内吸性药剂轮换；4) 3-5 天后复查新叶。"
             )
 
-        elif self._match(text, self._ENV_KEYWORDS):
+        elif self._match(query, self._ENV_KEYWORDS):
             site = self._site(text)
             result = self._execute("get_field_env", {"site_id": site, "hours": 24}, ledger, steps)
             before = len(ledger)
@@ -235,7 +242,13 @@ class OfflineAgent(BaseAgent):
             )
 
         else:
-            answer = self._handle_knowledge(text, ledger, steps)
+            answer = self._handle_knowledge(query, ledger, steps)
+
+        if borrowed:
+            answer = (
+                f"【多轮理解】本轮追问「{text}」不含可检索的实词，"
+                f"已结合上一轮问题「{borrowed[:24]}」补全检索意图。\n\n{answer}"
+            )
 
         answer, citations = self._finalize(answer, ledger)
         return AgentAnswer(
@@ -250,6 +263,43 @@ class OfflineAgent(BaseAgent):
     @staticmethod
     def _match(text: str, keywords: Iterable[str]) -> bool:
         return any(keyword in text for keyword in keywords)
+
+    def _is_follow_up(self, text: str) -> bool:
+        """是否是依赖上一轮的省略式追问，如「那这种药要打几次」。"""
+        stripped = text.strip().strip("？?。！!，,、 ")
+        if not stripped or len(stripped) > self._FOLLOWUP_MAX_LEN:
+            return False
+        return stripped.startswith(self._FOLLOWUP_HINTS)
+
+    def _has_domain_terms(self, text: str) -> bool:
+        """追问自身是否带够分量的领域词。
+
+        只要有一个知识库认识的实词就算数，但像「这个多久用一次」虽然撞上了
+        「一次」这种泛词，IDF 占比很低，仍判为依赖上文的追问。
+        """
+        terms = self._query_terms(text)
+        if not terms:
+            return False
+        total = sum(self._term_idf(term) for term in terms)
+        known = sum(self.kb.sparse._idf(term) for term in terms if self.kb.sparse._idf(term) > 0)
+        return total > 0 and known / total >= self._DOMAIN_TERM_RATIO
+
+    def _rewrite_query(self, text: str, history: list[dict[str, str]]) -> tuple[str, str]:
+        """把省略式追问补全，返回（用于检索的问题, 被借用的上一轮问题）。
+
+        「那这种药要打几次」这类追问本身没有可检索的实词，直接拿去检索会因
+        覆盖率过低而弃答。此时沿用上一轮的检索意图，多轮对话才真正接得上。
+        """
+        previous = ""
+        for message in reversed(history or []):
+            if str(message.get("role")) == "user":
+                candidate = str(message.get("content") or "").strip()
+                if candidate:
+                    previous = candidate
+                    break
+        if not previous or not self._is_follow_up(text) or self._has_domain_terms(text):
+            return text, ""
+        return previous, previous
 
     def _is_dosage_question(self, text: str) -> bool:
         if self._match(text, self._DOSAGE_KEYWORDS):

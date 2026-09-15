@@ -10,7 +10,7 @@ deployspec:
 
 **在线体验**：<https://zy1025-agri-rag-agent.ms.show> · 国内直连、无需登录、打开即可对话
 
-**项目状态**：35 项单元测试全部通过 · 30 条标注用例完成检索评测（Hybrid Recall@3 = 1.000 / MRR = 0.944）·
+**项目状态**：38 项单元测试全部通过 · 30 条标注用例完成检索评测（Hybrid Recall@3 = 1.000 / MRR = 0.944）·
 无需 GPU、无需 API Key 即可跑通完整链路
 
 ![界面预览](docs/screenshot.png)
@@ -287,7 +287,7 @@ agri-rag-agent/
 │  ├─ run_eval.py            网格评测脚本
 │  └─ reports/               评测报告与指标
 ├─ scripts/                  数据生成与索引构建脚本
-├─ tests/                    35 项单元测试
+├─ tests/                    38 项单元测试
 ├─ app.py                    线上部署入口（监听 7860 / $PORT）
 ├─ Dockerfile                通用容器镜像
 ├─ docs/DEPLOY.md            国内网络环境部署指南
