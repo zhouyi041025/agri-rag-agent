@@ -1,0 +1,14 @@
+﻿# 环境与缓存
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+
+# 构建产物（索引可重新生成）
+artifacts/
+eval/reports/*.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
