@@ -1,6 +1,10 @@
-numpy>=1.26
-fastapi>=0.110
-uvicorn[standard]>=0.29
-httpx>=0.27
+# 版本区间刻意放宽：云端预置镜像的 Python 版本未知，
+# 收紧上限会导致 pip 解析不到可用版本而构建失败。
+numpy>=1.22
+fastapi>=0.100
+uvicorn>=0.23
+httpx>=0.24
 jieba>=0.42
-pytest>=8.0
+
+# 测试依赖，不参与线上运行
+pytest>=7.4
