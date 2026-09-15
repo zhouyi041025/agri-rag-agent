@@ -8,6 +8,8 @@ deployspec:
 > 面向芦荟种植场景的 **RAG + Function Calling** 智能体：把毕业设计沉淀的领域知识做成受控知识库，
 > 让种植户和技术员用自然语言"问诊"，答案**句句可溯源**、建议**可执行**。
 
+[![tests](https://github.com/zhouyi041025/agri-rag-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/zhouyi041025/agri-rag-agent/actions/workflows/tests.yml)
+
 **在线体验**：<https://zy1025-agri-rag-agent.ms.show> · 国内直连、无需登录、打开即可对话
 
 **项目状态**：38 项单元测试全部通过 · 30 条标注用例完成检索评测（Hybrid Recall@3 = 1.000 / MRR = 0.944）·
