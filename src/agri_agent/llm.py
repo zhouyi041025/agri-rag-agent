@@ -11,7 +11,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .config import Settings, settings as default_settings
+from .config import Settings
+from .config import settings as default_settings
 
 
 @dataclass

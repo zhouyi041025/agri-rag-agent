@@ -43,7 +43,7 @@ class Chunk:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Chunk":
+    def from_dict(cls, data: dict) -> Chunk:
         return cls(**data)
 
 

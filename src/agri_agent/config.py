@@ -84,7 +84,7 @@ class Settings:
     price_output_per_1k: float = 0.0
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         load_dotenv()
         return cls(
             llm_provider=_get("AGRI_LLM_PROVIDER", "offline").lower(),

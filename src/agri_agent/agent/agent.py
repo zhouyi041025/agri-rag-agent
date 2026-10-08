@@ -12,15 +12,17 @@ from __future__ import annotations
 import math
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from typing import Any, Iterable
+from typing import Any
 
 from ..cache import QueryCache
-from ..config import Settings, settings as default_settings
+from ..config import Settings
+from ..config import settings as default_settings
 from ..llm import BaseLLM, build_llm
 from ..rag.pipeline import KnowledgeBase
 from ..text import split_sentences, tokenize
-from .tools import CitationLedger, PRODUCTS, ToolRegistry, build_default_tools
+from .tools import PRODUCTS, CitationLedger, ToolRegistry, build_default_tools
 
 SYSTEM_PROMPT = """你是「荟诊」，服务芦荟种植户的 AI 农技助手。你必须严守以下规则：
 
