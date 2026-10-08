@@ -12,9 +12,10 @@ from __future__ import annotations
 import math
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable
 
+from ..cache import QueryCache
 from ..config import Settings, settings as default_settings
 from ..llm import BaseLLM, build_llm
 from ..rag.pipeline import KnowledgeBase
@@ -42,6 +43,9 @@ class AgentAnswer:
     steps: list[dict[str, Any]] = field(default_factory=list)
     agent: str = ""
     elapsed_ms: float = 0.0
+    usage: dict[str, int] = field(default_factory=dict)
+    llm_calls: int = 0
+    cached: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,16 +54,26 @@ class AgentAnswer:
             "steps": self.steps,
             "agent": self.agent,
             "elapsed_ms": round(self.elapsed_ms, 1),
+            "usage": self.usage,
+            "llm_calls": self.llm_calls,
+            "cached": self.cached,
         }
 
 
 class BaseAgent:
     name = "base"
 
-    def __init__(self, kb: KnowledgeBase, tools: ToolRegistry, cfg: Settings | None = None):
+    def __init__(
+        self,
+        kb: KnowledgeBase,
+        tools: ToolRegistry,
+        cfg: Settings | None = None,
+        cache: QueryCache | None = None,
+    ):
         self.kb = kb
         self.tools = tools
         self.cfg = cfg or default_settings
+        self.cache = cache
         self._on_step = None
 
     def _execute(self, name: str, arguments: dict[str, Any], ledger: CitationLedger, steps: list[dict[str, Any]]) -> Any:
@@ -106,11 +120,32 @@ class BaseAgent:
         rewritten = re.sub(r"\[(\d+)\]", lambda m: f"[{mapping.get(int(m.group(1)), int(m.group(1)))}]", answer_text)
         return rewritten, renumbered
 
-    def answer(self, question: str, history: list[dict[str, str]] | None = None, on_step=None) -> AgentAnswer:
-        """对外统一入口；on_step 用于把工具调用过程实时推给前端。"""
+    def answer(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None = None,
+        on_step=None,
+        use_cache: bool = True,
+    ) -> AgentAnswer:
+        """对外统一入口；on_step 用于把工具调用过程实时推给前端。
+
+        命中缓存时不会重放工具轨迹（steps 为空、cached=True）——
+        缓存的语义是"同一个问题再次被问到"，不是"重新执行一遍"。
+        """
         self._on_step = on_step
         try:
-            return self._answer(question, history or [])
+            cache_key = None
+            if use_cache and self.cache is not None:
+                cache_key = QueryCache.make_key(question, history)
+                hit = self.cache.get(cache_key)
+                if hit is not None:
+                    # 返回副本而不是就地改标记：否则调用方手里"第一次的答案"
+                    # 会因为缓存对象被复用而一起被标成 cached=True（对象别名问题）。
+                    return replace(hit, cached=True)
+            result = self._answer(question, history or [])
+            if cache_key is not None:
+                self.cache.set(cache_key, result)
+            return result
         finally:
             self._on_step = None
 
@@ -121,14 +156,23 @@ class BaseAgent:
 class LLMAgent(BaseAgent):
     name = "llm"
 
-    def __init__(self, kb: KnowledgeBase, tools: ToolRegistry, llm: BaseLLM, cfg: Settings | None = None):
-        super().__init__(kb, tools, cfg)
+    def __init__(
+        self,
+        kb: KnowledgeBase,
+        tools: ToolRegistry,
+        llm: BaseLLM,
+        cfg: Settings | None = None,
+        cache: QueryCache | None = None,
+    ):
+        super().__init__(kb, tools, cfg, cache=cache)
         self.llm = llm
 
     def _answer(self, question: str, history: list[dict[str, str]]) -> AgentAnswer:
         started = time.perf_counter()
         ledger = CitationLedger()
         steps: list[dict[str, Any]] = []
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        llm_calls = 0
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
         for turn in history[-6:]:
@@ -139,6 +183,8 @@ class LLMAgent(BaseAgent):
         answer_text = ""
         for _ in range(max(1, self.cfg.max_agent_steps)):
             response = self.llm.chat(messages, tools=self.tools.schemas(), temperature=self.cfg.llm_temperature)
+            llm_calls += 1
+            self._accumulate_usage(usage, response.usage)
             if not response.tool_calls:
                 answer_text = response.content.strip()
                 break
@@ -156,6 +202,8 @@ class LLMAgent(BaseAgent):
         else:
             messages.append({"role": "user", "content": "请基于已有工具结果直接给出最终回答，并标注引用编号。"})
             response = self.llm.chat(messages, tools=None, temperature=self.cfg.llm_temperature)
+            llm_calls += 1
+            self._accumulate_usage(usage, response.usage)
             answer_text = response.content.strip()
 
         if not answer_text:
@@ -168,7 +216,16 @@ class LLMAgent(BaseAgent):
             steps=steps,
             agent=self.name,
             elapsed_ms=(time.perf_counter() - started) * 1000,
+            usage=usage,
+            llm_calls=llm_calls,
         )
+
+    @staticmethod
+    def _accumulate_usage(total: dict[str, int], usage: dict | None) -> None:
+        """累计多次调用的 token；不同厂商字段名不完全一致，缺省按 0 处理。"""
+        payload = usage or {}
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            total[key] = total.get(key, 0) + int(payload.get(key, 0) or 0)
 
 
 class OfflineAgent(BaseAgent):
@@ -446,11 +503,12 @@ def build_agent(
     kb: KnowledgeBase | None = None,
     tools: ToolRegistry | None = None,
     llm: BaseLLM | None = None,
+    cache: QueryCache | None = None,
 ) -> BaseAgent:
     cfg = cfg or default_settings
     kb = kb or KnowledgeBase.load_or_build(cfg)
     tools = tools or build_default_tools(kb, cfg)
     llm = llm if llm is not None else build_llm(cfg)
     if llm is not None:
-        return LLMAgent(kb, tools, llm, cfg)
-    return OfflineAgent(kb, tools, cfg)
+        return LLMAgent(kb, tools, llm, cfg, cache=cache)
+    return OfflineAgent(kb, tools, cfg, cache=cache)
