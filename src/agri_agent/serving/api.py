@@ -14,9 +14,11 @@ from pydantic import BaseModel, Field
 
 from ..agent.agent import build_agent
 from ..agent.tools import build_default_tools
+from ..cache import QueryCache
 from ..config import Settings, settings as default_settings
 from ..llm import build_llm
 from ..rag.pipeline import KnowledgeBase
+from ..stats import ServiceStats
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -28,6 +30,7 @@ class ChatRequest(BaseModel):
         max_length=20,
         description="多轮历史（最多 20 条），形如 [{'role':'user','content':'...'}]",
     )
+    use_cache: bool = Field(default=True, description="是否复用进程内查询缓存；评测时建议设为 false")
 
 
 class RetrieveResponse(BaseModel):
@@ -57,6 +60,8 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             application.state.tools = build_default_tools(kb, cfg)
             application.state.llm = build_llm(cfg)
             application.state.cfg = cfg
+            application.state.cache = QueryCache(max_size=cfg.cache_size) if cfg.cache_size > 0 else None
+            application.state.stats = ServiceStats(cfg.price_input_per_1k, cfg.price_output_per_1k)
             application.state._ready = True
 
     @asynccontextmanager
@@ -68,7 +73,9 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
 
     def _new_agent():
         _ensure_state(app)
-        return build_agent(cfg, kb=app.state.kb, tools=app.state.tools, llm=app.state.llm)
+        return build_agent(
+            cfg, kb=app.state.kb, tools=app.state.tools, llm=app.state.llm, cache=app.state.cache
+        )
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
@@ -97,8 +104,29 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
     @app.post("/chat")
     async def chat(payload: ChatRequest) -> dict:
         agent = _new_agent()
-        answer = await asyncio.to_thread(agent.answer, payload.message, payload.history)
+        try:
+            answer = await asyncio.to_thread(
+                agent.answer, payload.message, payload.history, None, payload.use_cache
+            )
+        except Exception:
+            app.state.stats.record_error()
+            raise
+        app.state.stats.record(answer)
         return answer.to_dict()
+
+    @app.get("/stats")
+    async def stats() -> dict:
+        """累计请求、缓存命中率、工具/模型调用次数、token 与估算成本（单价可配）。"""
+        _ensure_state(app)
+        payload = app.state.stats.snapshot(app.state.cache)
+        llm = app.state.llm
+        if llm is not None:
+            payload["llm"] = {
+                "model": cfg.llm_model,
+                "calls": getattr(llm, "calls", 0),
+                "retries": getattr(llm, "retries", 0),
+            }
+        return payload
 
     @app.post("/chat/stream")
     async def chat_stream(payload: ChatRequest) -> StreamingResponse:
@@ -114,9 +142,13 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         def work() -> None:
             try:
                 agent = _new_agent()
-                answer = agent.answer(payload.message, payload.history, on_step=on_step)
+                answer = agent.answer(
+                    payload.message, payload.history, on_step=on_step, use_cache=payload.use_cache
+                )
+                app.state.stats.record(answer)
                 emit({"type": "final", "payload": answer.to_dict()})
             except Exception as exc:  # 把异常也推给前端，避免连接悬挂
+                app.state.stats.record_error()
                 emit({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
             finally:
                 emit({"type": "__end__"})

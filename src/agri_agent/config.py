@@ -76,6 +76,12 @@ class Settings:
     rrf_k: int = 60
     use_rerank: bool = True
     max_agent_steps: int = 6
+    # 图像诊断模型：默认 YOLO(.pt)，也支持 ONNX(.onnx)；文件不存在时走占位演示
+    leaf_model_path: str = ""
+    # 进程内查询缓存（0 = 关闭）；统计金额需要配置单价，默认只记 token
+    cache_size: int = 128
+    price_input_per_1k: float = 0.0
+    price_output_per_1k: float = 0.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -100,6 +106,10 @@ class Settings:
             rrf_k=_get_int("AGRI_RRF_K", 60),
             use_rerank=_get_bool("AGRI_USE_RERANK", True),
             max_agent_steps=_get_int("AGRI_MAX_AGENT_STEPS", 6),
+            leaf_model_path=_get("AGRI_LEAF_MODEL", ""),
+            cache_size=_get_int("AGRI_CACHE_SIZE", 128),
+            price_input_per_1k=_get_float("AGRI_PRICE_INPUT_PER_1K", 0.0),
+            price_output_per_1k=_get_float("AGRI_PRICE_OUTPUT_PER_1K", 0.0),
         )
 
     @property

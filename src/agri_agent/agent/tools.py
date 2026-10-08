@@ -334,12 +334,54 @@ def make_dosage_tool() -> Tool:
 
 
 def make_diagnose_tool(cfg: Settings) -> Tool:
-    model_path = Path(cfg.project_root) / "models" / "leaf_disease.pt"
+    model_path = Path(cfg.leaf_model_path) if cfg.leaf_model_path else Path(cfg.project_root) / "models" / "leaf_disease.pt"
+
+    def _infer_onnx(model_file: Path, image_file: Path) -> list[dict[str, Any]] | None:
+        """ONNX 推理（可选依赖 onnxruntime + Pillow）。
+
+        输入契约：RGB、缩放到 640x640、除以 255、CHW、NCHW float32；
+        输出契约：YOLO 常见导出形态 [1, N, 6] = x1, y1, x2, y2, score, class_id。
+        依赖缺失或推理失败返回 None，由上层回退到 YOLO / 占位实现。
+        """
+        try:
+            import numpy as np
+            import onnxruntime as ort
+            from PIL import Image
+        except Exception:
+            return None
+        try:
+            image = Image.open(image_file).convert("RGB").resize((640, 640))
+            tensor = (np.asarray(image, dtype=np.float32) / 255.0).transpose(2, 0, 1)[None]
+            session = ort.InferenceSession(str(model_file), providers=["CPUExecutionProvider"])
+            outputs = session.run(None, {session.get_inputs()[0].name: tensor})
+            raw = np.asarray(outputs[0])
+            if raw.ndim == 3 and raw.shape[0] == 1:
+                raw = raw[0]
+            detections: list[dict[str, Any]] = []
+            for row in raw[:50]:
+                if len(row) < 6:
+                    continue
+                score = float(row[4])
+                if score < 0.25:
+                    continue
+                detections.append({"class_id": int(row[5]), "confidence": round(score, 3)})
+            return detections
+        except Exception:
+            return None
 
     def diagnose_leaf_image(image_path: str = "", site_id: str = "") -> ToolResult:
         path = Path(image_path) if image_path else None
         if path and not path.exists():
             return ToolResult(ok=False, content=f"图像不存在：{image_path}")
+
+        if path and model_path.exists() and model_path.suffix.lower() == ".onnx":
+            detections = _infer_onnx(model_path, path)
+            if detections is not None:
+                return ToolResult(
+                    ok=True,
+                    content=f"检测到 {len(detections)} 个目标：{json.dumps(detections, ensure_ascii=False)}",
+                    data={"source": "onnx", "model": model_path.name, "detections": detections},
+                )
 
         if path and model_path.exists():
             try:
@@ -358,7 +400,10 @@ def make_diagnose_tool(cfg: Settings) -> Tool:
 
         placeholder = {
             "source": "placeholder",
-            "note": "未部署本地检测模型（models/leaf_disease.pt），以下为演示用结构化返回；接入 YOLOv11 检测/分割模型后自动切换为真实推理结果。",
+            "note": (
+                f"未部署本地检测模型（{model_path}），以下为演示用结构化返回；"
+                "接入口支持 YOLO(.pt) 与 ONNX(.onnx)，放入模型文件后自动切换为真实推理（契约见 docs/MODEL.md）。"
+            ),
             "site_id": site_id or "S1",
             "top_k": [
                 {"disease": "炭疽病", "confidence": 0.86, "lesion_ratio": 0.17, "grade": "中度"},
@@ -375,7 +420,10 @@ def make_diagnose_tool(cfg: Settings) -> Tool:
 
     return Tool(
         name="diagnose_leaf_image",
-        description="对叶片照片做病害识别与分级，返回病害类别、置信度和病斑面积占比。用户提供图片路径或描述图片时调用。",
+        description=(
+            "对叶片照片做病害识别与分级，返回病害类别、置信度和病斑面积占比。"
+            "用户提供图片路径或描述图片时调用。支持 YOLO(.pt) 与 ONNX(.onnx) 两种本地模型。"
+        ),
         parameters={
             "type": "object",
             "properties": {

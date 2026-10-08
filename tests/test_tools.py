@@ -73,3 +73,38 @@ def test_forecast_tool_offline_payload(kb):
     assert result.ok
     assert result.data["source"] == "offline-stub"
     assert len(result.data["days"]) == 3
+
+
+def test_diagnose_falls_back_to_placeholder_without_model(kb):
+    """没有模型文件时必须回退到演示数据，并在 note 里说清接入方式。"""
+    tools = _tools(kb)
+    result = tools.call("diagnose_leaf_image", {"image_path": ""})
+    assert result.ok
+    assert result.data["source"] == "placeholder"
+    assert "ONNX" in result.data["note"]
+
+
+def test_diagnose_reports_missing_image(kb):
+    tools = _tools(kb)
+    result = tools.call("diagnose_leaf_image", {"image_path": "不存在的图片.png"})
+    assert not result.ok
+    assert "图像不存在" in result.content
+
+
+def test_diagnose_with_unloadable_onnx_falls_back(tmp_path):
+    """放了一个坏 .onnx 也不能抛异常：推理失败要回退到占位实现。"""
+    from agri_agent.agent import tools as tools_module
+    from agri_agent.config import Settings
+
+    model = tmp_path / "leaf_disease.onnx"
+    model.write_bytes(b"not-a-real-onnx")
+    image = tmp_path / "leaf.png"
+    image.write_bytes(b"not-a-real-image")
+
+    cfg = Settings()
+    cfg.leaf_model_path = str(model)
+    tool = tools_module.make_diagnose_tool(cfg)
+
+    result = tool.run({"image_path": str(image)})
+    assert result.ok
+    assert result.data["source"] == "placeholder"

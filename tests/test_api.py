@@ -47,6 +47,20 @@ def test_chat_rejects_too_many_history_turns():
         assert client.post("/chat", json={"message": "继续", "history": history}).status_code == 422
 
 
+def test_stats_records_requests_and_cache_hits():
+    with TestClient(create_app()) as client:
+        first = client.post("/chat", json={"message": "芦荟炭疽病怎么防治？"}).json()
+        second = client.post("/chat", json={"message": "芦荟炭疽病怎么防治？"}).json()
+        stats = client.get("/stats").json()
+
+        assert first["cached"] is False
+        assert second["cached"] is True
+        assert stats["requests"] == 2
+        assert stats["cached_requests"] == 1
+        assert stats["cache"]["hits"] >= 1
+        assert stats["tool_calls"] >= 1
+
+
 def test_chat_stream_emits_step_and_final_events():
     with TestClient(create_app()) as client:
         with client.stream("POST", "/chat/stream", json={"message": "S3 现在田间环境怎么样？"}) as response:

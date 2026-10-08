@@ -1,0 +1,10 @@
+services:
+  agri-rag-agent:
+    build: .
+    # 典型容器平台与魔搭创空间探测 7860；本地访问 http://127.0.0.1:7860
+    ports:
+      - "7860:7860"
+    # 可选：把 .env.example 复制成 .env 再填 Key；不填则跑离线规则模式
+    env_file:
+      - .env
+    restart: unless-stopped

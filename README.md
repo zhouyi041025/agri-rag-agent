@@ -49,6 +49,8 @@ deployspec:
 | **流式输出** | SSE 逐事件推送工具调用轨迹与最终答案，前端实时展示推理过程 |
 | **三层向量化降级** | 本地 BGE 模型 → 云端 Embedding API → 内置 TF-IDF，按可用性自动选择 |
 | **离线可跑** | `AGRI_LLM_PROVIDER=offline` 时使用规则路由 + 抽取式回答，全链路可演示 |
+| **查询缓存** | 进程内 LRU（`AGRI_CACHE_SIZE`，默认 128；0 关闭），命中时返回 `cached=true` |
+| **运行统计** | `/stats` 暴露请求、缓存命中、工具/模型调用次数与 token；配置 `AGRI_PRICE_*_PER_1K` 后给出估算成本 |
 
 ---
 
@@ -232,6 +234,7 @@ AGRI_LLM_API_KEY=sk-xxxx
 | `GET` | `/retrieve` | 仅执行检索，支持 `mode=hybrid\|bm25\|dense` 与 `top_k`，用于调参与排查 |
 | `GET` | `/tools` | 返回已注册工具的 JSON Schema |
 | `GET` | `/health` | 服务状态、当前 Agent 类型、知识库统计、工具列表 |
+| `GET` | `/stats` | 累计请求、缓存命中率、工具/模型调用次数、token 与估算成本 |
 
 ```bash
 curl -X POST http://127.0.0.1:8000/chat \
@@ -265,8 +268,11 @@ agri-rag-agent/
 ├─ data/
 │  ├─ kb/                    4 篇领域知识文档（Markdown，按小节组织）
 │  └─ env/field_env.csv      示例环境数据（5 个监测点 x 14 天，结构同真实网关数据）
+│  └─ synonyms.json          查询扩展同义词表（外置数据，改词表不动代码）
 ├─ src/agri_agent/
 │  ├─ config.py              集中配置（环境变量 / .env）
+│  ├─ cache.py               进程内查询缓存（LRU）
+│  ├─ stats.py               运行统计（请求 / token / 成本）
 │  ├─ cli.py                 build / ask / retrieve / chat 子命令
 │  ├─ llm.py                 OpenAI 兼容客户端 + Function Calling
 │  ├─ text.py                归一化、分词、字符 n-gram、分句
@@ -291,8 +297,10 @@ agri-rag-agent/
 ├─ scripts/                  数据生成与索引构建脚本
 ├─ tests/                    38 项单元测试
 ├─ app.py                    线上部署入口（监听 7860 / $PORT）
+├─ docker-compose.yml        一键起服务（env_file 可选挂 .env）
 ├─ Dockerfile                通用容器镜像
 ├─ docs/DEPLOY.md            国内网络环境部署指南
+├─ docs/MODEL.md             图像诊断模型接入契约（YOLO / ONNX）
 └─ artifacts/index/          构建产物（可重建）
 ```
 
@@ -316,7 +324,7 @@ agri-rag-agent/
 - 田间环境数据为**示例数据**（由 `scripts/make_env_data.py` 固定随机种子复现生成），并非真实监测记录；
   接入真实数据只需替换 `data/env/field_env.csv`，字段结构保持一致即可
 - TF-IDF 降级模式的语义泛化能力弱于真实 Embedding 模型，生产环境建议配置 BGE
-- `diagnose_leaf_image` 目前为接口占位，返回固定结构，尚未接入训练好的视觉模型
+- `diagnose_leaf_image` 默认返回演示数据（仓库不附带训练权重）；接入口已支持 **YOLO(.pt) 与 ONNX(.onnx)**，放入模型即切换为真实推理，输入/输出契约与验收清单见 [`docs/MODEL.md`](docs/MODEL.md)
 - 评测集规模为 30 条，指标用于横向对比不同策略的相对优劣，不代表线上绝对水平
 
 **后续计划**：接入视觉模型完成端到端诊断闭环 · 补充多作物知识库 · 引入交叉编码器重排序 ·
