@@ -35,6 +35,18 @@ def test_chat_endpoint_returns_answer_and_citations():
         assert body["agent"] in {"rule-based", "llm"}
 
 
+def test_chat_rejects_overlong_message():
+    """输入上限：2000 字，防止一次请求把上下文预算是打满。"""
+    with TestClient(create_app()) as client:
+        assert client.post("/chat", json={"message": "问" * 2001}).status_code == 422
+
+
+def test_chat_rejects_too_many_history_turns():
+    with TestClient(create_app()) as client:
+        history = [{"role": "user", "content": f"第{i}问"} for i in range(21)]
+        assert client.post("/chat", json={"message": "继续", "history": history}).status_code == 422
+
+
 def test_chat_stream_emits_step_and_final_events():
     with TestClient(create_app()) as client:
         with client.stream("POST", "/chat/stream", json={"message": "S3 现在田间环境怎么样？"}) as response:
