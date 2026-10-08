@@ -59,6 +59,9 @@ class Settings:
     llm_api_key: str = ""
     llm_temperature: float = 0.2
     llm_timeout: float = 60.0
+    # 网络抖动与 429 的重试预算：失败后按 0.5s、1s、2s… 指数退避，上限 backoff_cap
+    llm_max_retries: int = 2
+    llm_backoff_cap: float = 8.0
 
     embed_provider: str = "auto"
     embed_base_url: str = "https://api.siliconflow.cn/v1"
@@ -83,6 +86,8 @@ class Settings:
             llm_model=_get("AGRI_LLM_MODEL", "deepseek-chat"),
             llm_api_key=_get("AGRI_LLM_API_KEY", ""),
             llm_temperature=_get_float("AGRI_LLM_TEMPERATURE", 0.2),
+            llm_max_retries=_get_int("AGRI_LLM_MAX_RETRIES", 2),
+            llm_backoff_cap=_get_float("AGRI_LLM_BACKOFF_CAP", 8.0),
             embed_provider=_get("AGRI_EMBED_PROVIDER", "auto").lower(),
             embed_base_url=_get("AGRI_EMBED_BASE_URL", "https://api.siliconflow.cn/v1").rstrip("/"),
             embed_model=_get("AGRI_EMBED_MODEL", "BAAI/bge-m3"),

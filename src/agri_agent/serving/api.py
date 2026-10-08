@@ -22,8 +22,12 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="用户问题")
-    history: list[dict] = Field(default_factory=list, description="多轮历史，形如 [{'role':'user','content':'...'}]")
+    message: str = Field(..., min_length=1, max_length=2000, description="用户问题（最长 2000 字）")
+    history: list[dict] = Field(
+        default_factory=list,
+        max_length=20,
+        description="多轮历史（最多 20 条），形如 [{'role':'user','content':'...'}]",
+    )
 
 
 class RetrieveResponse(BaseModel):

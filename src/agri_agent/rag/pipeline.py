@@ -22,11 +22,15 @@ class KnowledgeBase:
         embedder: BaseEmbedder,
         store: VectorStore,
         meta: dict | None = None,
+        rrf_k: int | None = None,
     ):
         self.chunks = chunks
         self.embedder = embedder
         self.store = store
         self.meta = meta or {}
+        # RRF 参数随实例走：此前 search() 读的是模块级 default_settings.rrf_k，
+        # 构造 KB 时传入的 cfg 会被静默忽略（多实例/测试场景下行为不一致）。
+        self.rrf_k = default_settings.rrf_k if rrf_k is None else int(rrf_k)
         self.sparse = BM25Retriever(chunks)
         self.dense = DenseRetriever(store, embedder)
 
@@ -73,7 +77,7 @@ class KnowledgeBase:
             "embed_dim": store.dim,
             "built_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
-        return cls(chunks, embedder, store, meta)
+        return cls(chunks, embedder, store, meta, rrf_k=cfg.rrf_k)
 
     def save(self, directory: str | Path | None = None, cfg: Settings | None = None) -> Path:
         cfg = cfg or default_settings
@@ -105,7 +109,7 @@ class KnowledgeBase:
             )
         meta_path = directory / "kb_meta.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
-        return cls(store.chunks, embedder, store, meta)
+        return cls(store.chunks, embedder, store, meta, rrf_k=cfg.rrf_k)
 
     @classmethod
     def load_or_build(cls, cfg: Settings | None = None, rebuild: bool = False) -> "KnowledgeBase":
@@ -131,7 +135,7 @@ class KnowledgeBase:
             return self.sparse.search(query, top_k=top_k)
         if mode == "dense":
             return self.dense.search(query, top_k=top_k)
-        hybrid = HybridRetriever(self.sparse, self.dense, rrf_k=default_settings.rrf_k)
+        hybrid = HybridRetriever(self.sparse, self.dense, rrf_k=self.rrf_k)
         return hybrid.search(query, top_k=top_k)
 
     def build_context(self, query: str, top_k: int = 5, mode: str = "hybrid", expand: bool = True) -> tuple[str, list[dict]]:

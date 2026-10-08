@@ -1,5 +1,12 @@
 from agri_agent.rag.retriever import reciprocal_rank_fusion
 
+import numpy as np
+
+from agri_agent.config import settings as default_settings
+from agri_agent.rag import pipeline as pipeline_module
+from agri_agent.rag.embedder import HashingTfidfEmbedder
+from agri_agent.rag.store import VectorStore
+
 
 def test_bm25_ranks_correct_section(kb):
     results = kb.search("炭疽病的症状是什么", top_k=3, mode="bm25", expand=False)
@@ -36,3 +43,25 @@ def test_rrf_fusion_prefers_consensus_ranking(kb):
     assert fused[0].retriever == "hybrid"
     scores = [item.score for item in fused]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_search_uses_configured_rrf_k(monkeypatch):
+    """回归：search() 曾读模块级 default_settings.rrf_k，构造 KB 时传入的 rrf_k 被静默忽略。"""
+    captured: dict = {}
+
+    class SpyHybrid:
+        def __init__(self, sparse, dense, rrf_k=60, fetch_k=20):
+            captured["rrf_k"] = rrf_k
+
+        def search(self, query, top_k=5):
+            return []
+
+    monkeypatch.setattr(pipeline_module, "HybridRetriever", SpyHybrid)
+    monkeypatch.setattr(default_settings, "rrf_k", 60)
+
+    embedder = HashingTfidfEmbedder().fit([])
+    store = VectorStore([], np.zeros((0, embedder.dim), dtype=np.float32))
+    kb = pipeline_module.KnowledgeBase([], embedder, store, rrf_k=7)
+
+    kb.search("任意问题")
+    assert captured["rrf_k"] == 7

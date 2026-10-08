@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,6 +44,8 @@ class OpenAICompatLLM(BaseLLM):
     """OpenAI 兼容客户端，支持流式与非流式；工具调用走标准 tool_calls 字段。"""
 
     name = "openai-compatible"
+    # 重试间隔上限（秒）：再长就不如让上层降级为规则 Agent，用户至少能拿到回答
+    DEFAULT_BACKOFF_CAP = 8.0
 
     def __init__(
         self,
@@ -51,6 +54,8 @@ class OpenAICompatLLM(BaseLLM):
         api_key: str,
         temperature: float = 0.2,
         timeout: float = 60.0,
+        max_retries: int = 2,
+        backoff_cap: float = DEFAULT_BACKOFF_CAP,
     ):
         import httpx
 
@@ -58,7 +63,12 @@ class OpenAICompatLLM(BaseLLM):
         self.model = model
         self.api_key = api_key
         self.temperature = temperature
+        self.max_retries = max(0, int(max_retries))
+        self.backoff_cap = float(backoff_cap)
         self._client = httpx.Client(timeout=timeout)
+        # 供 /stats 观测：真实调用次数与重试次数（限流时能立刻看出来）
+        self.calls = 0
+        self.retries = 0
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
@@ -73,11 +83,25 @@ class OpenAICompatLLM(BaseLLM):
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        response = self._client.post(
-            f"{self.base_url}/chat/completions", headers=self._headers(), json=payload
-        )
-        response.raise_for_status()
-        body = response.json()
+        body: dict[str, Any] | None = None
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                self.calls += 1
+                response = self._client.post(
+                    f"{self.base_url}/chat/completions", headers=self._headers(), json=payload
+                )
+                response.raise_for_status()
+                body = response.json()
+                break
+            except Exception as exc:  # 网络抖动、限流（429）、超时都走重试
+                last_error = exc
+                if attempt < self.max_retries:
+                    self.retries += 1
+                    # 指数退避：被限流后立刻重试只会继续被拒，等待通常能让第二次放行
+                    time.sleep(min(0.5 * 2**attempt, self.backoff_cap))
+        if body is None:
+            raise RuntimeError(f"调用 LLM 失败（已重试 {self.retries} 次）：{last_error}")
 
         choice = (body.get("choices") or [{}])[0]
         message = choice.get("message") or {}
@@ -118,4 +142,6 @@ def build_llm(cfg: Settings | None = None) -> BaseLLM | None:
         api_key=cfg.llm_api_key,
         temperature=cfg.llm_temperature,
         timeout=cfg.llm_timeout,
+        max_retries=cfg.llm_max_retries,
+        backoff_cap=cfg.llm_backoff_cap,
     )
