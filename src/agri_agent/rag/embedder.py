@@ -25,7 +25,7 @@ class BaseEmbedder:
     name = "base"
     dim = 0
 
-    def fit(self, texts: list[str]) -> "BaseEmbedder":
+    def fit(self, texts: list[str]) -> BaseEmbedder:
         return self
 
     def encode(self, texts: list[str]) -> np.ndarray:  # pragma: no cover - 抽象方法
@@ -61,7 +61,7 @@ class HashingTfidfEmbedder(BaseEmbedder):
             self.idf = np.zeros(0, dtype=np.float32)
         self.dim = len(self.vocab)
 
-    def fit(self, texts: list[str]) -> "HashingTfidfEmbedder":
+    def fit(self, texts: list[str]) -> HashingTfidfEmbedder:
         doc_freq: Counter[str] = Counter()
         for text in texts:
             doc_freq.update(set(_features(text)))
@@ -100,7 +100,7 @@ class HashingTfidfEmbedder(BaseEmbedder):
         )
 
     @classmethod
-    def load(cls, path: Path) -> "HashingTfidfEmbedder":
+    def load(cls, path: Path) -> HashingTfidfEmbedder:
         payload = json.loads(path.read_text(encoding="utf-8"))
         vocab = {feat: idx for idx, feat in enumerate(payload["vocab"])}
         embedder = cls(vocab=vocab, idf=np.array(payload["idf"], dtype=np.float32))
@@ -146,7 +146,7 @@ class ApiEmbedder(BaseEmbedder):
         )
 
     @classmethod
-    def load(cls, path: Path, base_url: str, api_key: str) -> "ApiEmbedder":
+    def load(cls, path: Path, base_url: str, api_key: str) -> ApiEmbedder:
         payload = json.loads(path.read_text(encoding="utf-8"))
         return cls(base_url=base_url, model=payload["model"], api_key=api_key)
 

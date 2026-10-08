@@ -1,4 +1,3 @@
-import json
 
 from agri_agent.agent.tools import CitationLedger, build_default_tools
 

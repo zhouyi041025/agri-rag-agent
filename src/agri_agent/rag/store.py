@@ -64,7 +64,7 @@ class VectorStore:
         return directory
 
     @classmethod
-    def load(cls, directory: str | Path) -> "VectorStore":
+    def load(cls, directory: str | Path) -> VectorStore:
         directory = Path(directory)
         embeddings = np.load(directory / "embeddings.npy")
         chunks: list[Chunk] = []

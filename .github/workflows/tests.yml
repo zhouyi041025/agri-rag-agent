@@ -27,9 +27,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+          pip install pytest-cov ruff
 
-      - name: 运行测试
-        run: python -m pytest -q
+      - name: 代码检查（ruff）
+        run: ruff check .
+
+      - name: 运行测试（含覆盖率门槛）
+        run: python -m pytest -q --cov=agri_agent --cov-report=term --cov-fail-under=78
 
       - name: 复现检索评测指标
         run: python eval/run_eval.py

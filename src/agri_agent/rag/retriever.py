@@ -11,8 +11,6 @@ import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
-import numpy as np
-
 from ..text import tokenize
 from .chunker import Chunk
 from .embedder import BaseEmbedder

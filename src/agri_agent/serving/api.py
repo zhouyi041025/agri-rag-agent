@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 from ..agent.agent import build_agent
 from ..agent.tools import build_default_tools
 from ..cache import QueryCache
-from ..config import Settings, settings as default_settings
+from ..config import Settings
+from ..config import settings as default_settings
 from ..llm import build_llm
 from ..rag.pipeline import KnowledgeBase
 from ..stats import ServiceStats

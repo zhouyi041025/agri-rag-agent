@@ -1,10 +1,9 @@
-from agri_agent.rag.retriever import reciprocal_rank_fusion
-
 import numpy as np
 
 from agri_agent.config import settings as default_settings
 from agri_agent.rag import pipeline as pipeline_module
 from agri_agent.rag.embedder import HashingTfidfEmbedder
+from agri_agent.rag.retriever import reciprocal_rank_fusion
 from agri_agent.rag.store import VectorStore
 
 

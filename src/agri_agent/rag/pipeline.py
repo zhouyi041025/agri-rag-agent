@@ -6,7 +6,8 @@ import json
 import time
 from pathlib import Path
 
-from ..config import Settings, settings as default_settings
+from ..config import Settings
+from ..config import settings as default_settings
 from .chunker import Chunk, chunk_documents
 from .embedder import BaseEmbedder, HashingTfidfEmbedder, build_embedder
 from .expand import expand_query
@@ -43,7 +44,7 @@ class KnowledgeBase:
         strategy: str | None = None,
         embed_provider: str | None = None,
         cfg: Settings | None = None,
-    ) -> "KnowledgeBase":
+    ) -> KnowledgeBase:
         cfg = cfg or default_settings
         kb_dir = Path(kb_dir or cfg.kb_dir)
         strategy = strategy or cfg.chunk_strategy
@@ -91,7 +92,7 @@ class KnowledgeBase:
         return directory
 
     @classmethod
-    def load(cls, directory: str | Path, cfg: Settings | None = None) -> "KnowledgeBase":
+    def load(cls, directory: str | Path, cfg: Settings | None = None) -> KnowledgeBase:
         cfg = cfg or default_settings
         directory = Path(directory)
         store = VectorStore.load(directory)
@@ -112,7 +113,7 @@ class KnowledgeBase:
         return cls(store.chunks, embedder, store, meta, rrf_k=cfg.rrf_k)
 
     @classmethod
-    def load_or_build(cls, cfg: Settings | None = None, rebuild: bool = False) -> "KnowledgeBase":
+    def load_or_build(cls, cfg: Settings | None = None, rebuild: bool = False) -> KnowledgeBase:
         cfg = cfg or default_settings
         index_file = Path(cfg.artifacts_dir) / "embeddings.npy"
         if index_file.exists() and not rebuild:
