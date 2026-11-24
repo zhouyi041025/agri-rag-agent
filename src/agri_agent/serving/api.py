@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from .. import __version__ as APP_VERSION
 from ..agent.agent import build_agent
 from ..agent.tools import build_default_tools
 from ..cache import QueryCache
@@ -70,7 +71,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         _ensure_state(app)
         yield
 
-    app = FastAPI(title="芦荟病虫害智能问答与诊断 Agent", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="芦荟病虫害智能问答与诊断 Agent", version=APP_VERSION, lifespan=lifespan)
 
     def _new_agent():
         _ensure_state(app)

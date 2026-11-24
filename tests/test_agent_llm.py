@@ -122,3 +122,32 @@ def test_llm_agent_trims_citations_to_those_actually_used(kb):
     assert answer.citations[0]["index"] == 1, "台账应被裁剪并重排为 [1]"
     assert "[1]" in answer.answer
     assert "[2]" not in answer.answer
+
+
+def test_llm_agent_drops_hallucinated_citation_numbers(kb):
+    """模型正文出现台账里不存在的 [9] 时必须删除，不能留下悬空标记。"""
+    llm = ScriptedLLM(
+        [
+            tool_call_response("search_knowledge", {"query": "炭疽病 防治", "top_k": 3}),
+            final_response("按资料执行即可。[2] 另外还有一条传闻[9]。"),
+        ]
+    )
+    agent = LLMAgent(kb, build_default_tools(kb), llm, Settings())
+    answer = agent.answer("芦荟炭疽病怎么防治？")
+    assert "[9]" not in answer.answer
+    assert "[2]" not in answer.answer, "合法编号 [2] 应被重排为 [1]"
+    assert "[1]" in answer.answer
+    assert [item["index"] for item in answer.citations] == [1]
+
+
+def test_llm_agent_without_citation_markers_returns_empty_citations(kb):
+    """正文完全没标引用时，绝不能把检索到的候选片段全塞进溯源面板。"""
+    llm = ScriptedLLM(
+        [
+            tool_call_response("search_knowledge", {"query": "炭疽病 防治", "top_k": 3}),
+            final_response("这是我凭印象写的回答，没有标注任何来源。"),
+        ]
+    )
+    agent = LLMAgent(kb, build_default_tools(kb), llm, Settings())
+    answer = agent.answer("芦荟炭疽病怎么防治？")
+    assert answer.citations == [], "无引用标记时溯源列表必须为空"

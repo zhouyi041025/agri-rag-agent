@@ -1,0 +1,72 @@
+{
+  "_warning": "本文件为演示用登记用药数据。source 字段目前均为待核实状态，生产使用或对外发布前必须由农技人员逐条对照农药登记标签核对并填写真实来源。切勿将本文件当作用药依据。",
+  "version": "0.1.0-demo",
+  "products": {
+    "代森锰锌": {
+      "kind": "保护性杀菌剂",
+      "dose_g_per_mu": 160,
+      "water_l_per_mu": 45,
+      "dilution": "600-800 倍",
+      "safety_days": 15,
+      "max_times": 3,
+      "targets": ["炭疽病", "褐斑病", "黑斑病"],
+      "source": "待核实",
+      "source_version": null
+    },
+    "多菌灵": {
+      "kind": "内吸性杀菌剂",
+      "dose_g_per_mu": 100,
+      "water_l_per_mu": 45,
+      "dilution": "800-1000 倍",
+      "safety_days": 20,
+      "max_times": 2,
+      "targets": ["炭疽病", "叶枯病", "根腐病"],
+      "source": "待核实",
+      "source_version": null
+    },
+    "苯醚甲环唑": {
+      "kind": "三唑类内吸杀菌剂",
+      "dose_g_per_mu": 30,
+      "water_l_per_mu": 45,
+      "dilution": "1500-2000 倍",
+      "safety_days": 21,
+      "max_times": 3,
+      "targets": ["炭疽病", "黑斑病"],
+      "source": "待核实",
+      "source_version": null
+    },
+    "咪鲜胺": {
+      "kind": "咪唑类杀菌剂",
+      "dose_g_per_mu": 50,
+      "water_l_per_mu": 45,
+      "dilution": "1000-1500 倍",
+      "safety_days": 14,
+      "max_times": 3,
+      "targets": ["炭疽病"],
+      "source": "待核实",
+      "source_version": null
+    },
+    "吡唑醚菌酯": {
+      "kind": "甲氧基丙烯酸酯类杀菌剂",
+      "dose_g_per_mu": 25,
+      "water_l_per_mu": 45,
+      "dilution": "2000-2500 倍",
+      "safety_days": 14,
+      "max_times": 3,
+      "targets": ["炭疽病", "褐斑病"],
+      "source": "待核实",
+      "source_version": null
+    },
+    "春雷霉素": {
+      "kind": "农用抗生素",
+      "dose_g_per_mu": 40,
+      "water_l_per_mu": 45,
+      "dilution": "1000-1200 倍",
+      "safety_days": 10,
+      "max_times": 4,
+      "targets": ["软腐病", "叶枯病"],
+      "source": "待核实",
+      "source_version": null
+    }
+  }
+}

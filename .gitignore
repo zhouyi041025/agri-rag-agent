@@ -4,6 +4,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+.coverage
+coverage.xml
+htmlcov/
 
 # 构建产物（索引可重新生成）
 artifacts/

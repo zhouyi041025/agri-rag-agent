@@ -122,6 +122,25 @@ deployspec:
 - **切分越碎，融合收益越大**：fixed 策略下单路召回更不稳定，Hybrid 相对 Dense 的 Recall@3 提升 3.3 个百分点；
   heading 策略下单路已足够强，融合的边际收益变小 —— 说明**切分质量才是检索效果的第一性因素**。
 
+### 生成端评测（补充）
+
+`eval/run_eval.py` 只评检索，生成质量由 `eval/run_gen_eval.py` 覆盖：
+
+```bash
+python eval/run_gen_eval.py
+```
+
+四项指标（默认用离线 Agent，无需 Key、可复现）：
+
+| 指标 | 当前结果 | 含义 |
+| --- | --- | --- |
+| 引用正确率 | 100% | 正文 `[n]` 与溯源列表严格一一对应，无幻觉编号 / 幽灵引用 |
+| 引用覆盖率 | 76.7% | 约 1/4 的问题走了确定性工具或拒答，这类答案不带引用属预期 |
+| 忠实度（规则近似） | 1.000 | 带引用句子的关键词能在被引片段原文中找到 |
+| 拒答正确率 | 100% | 3 条知识库外问题均正确拒答，未编造内容 |
+
+忠实度是纯规则近似，只适合做版本间回归对比，**不代表绝对事实正确率**（详见脚本注释）。
+
 ---
 
 ## 五、工程问题复盘
@@ -210,6 +229,24 @@ docker run -p 7860:7860 agri-rag-agent
 
 默认 `AGRI_LLM_PROVIDER=offline`，不调用任何外部接口，用规则路由 + 抽取式回答保证全链路可跑。
 在 `.env` 中填入 Key 后自动切换为 Function Calling Agent，任何 **OpenAI 兼容**接口都可直接使用
+（DeepSeek / 通义千问 / 智谱 / Moonshot / OpenAI）。
+
+**智谱 GLM 快速配置**（已实测跑通）：
+
+```ini
+AGRI_LLM_PROVIDER=glm
+AGRI_LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+AGRI_LLM_MODEL=glm-4.7-flash
+AGRI_LLM_API_KEY=你的Key
+```
+
+注意两点：`base_url` 是 `/api/paas/v4` 不是 `/v1`；智谱 Key 为 `id.secret` 两段式，
+中间的点号必须保留。免费档 `glm-4.7-flash` 有严格并发限制，公网部署建议换付费模型
+（如 `glm-4.6` / `glm-5.3`）并在网关层加限流。完整模板见 `.env.example.glm`。
+
+
+默认 `AGRI_LLM_PROVIDER=offline`，不调用任何外部接口，用规则路由 + 抽取式回答保证全链路可跑。
+在 `.env` 中填入 Key 后自动切换为 Function Calling Agent，任何 **OpenAI 兼容**接口都可直接使用
 （DeepSeek / 通义千问 / 智谱 / Moonshot / OpenAI）：
 
 ```ini
@@ -295,7 +332,7 @@ agri-rag-agent/
 │  ├─ run_eval.py            网格评测脚本
 │  └─ reports/               评测报告与指标
 ├─ scripts/                  数据生成与索引构建脚本
-├─ tests/                    38 项单元测试
+├─ tests/                    单元测试（当前跑 `pytest -q` 查看数量）
 ├─ app.py                    线上部署入口（监听 7860 / $PORT）
 ├─ docker-compose.yml        一键起服务（env_file 可选挂 .env）
 ├─ Dockerfile                通用容器镜像
@@ -306,7 +343,18 @@ agri-rag-agent/
 
 ---
 
-## 十、技术选型与取舍
+## 十、部署安全提示
+
+本项目的 `/chat`、`/stats` 等接口**默认无鉴权**，这是为了让公开 Demo 开箱可用。若部署到公网并接入真实大模型 Key，请务必在网关层补上：
+
+- **速率限制**：按 IP 限制 `/chat` 的请求频率，避免被刷导致 token 费用失控；
+- **接口鉴权**：`/stats` 会暴露请求量、token 与估算成本，生产环境建议限制访问；
+- **输入长度**：`/chat` 已限制单条 2000 字、历史 20 条，网关层可再收紧；
+- **密钥管理**：API Key 只放在服务端环境变量，不要写进前端或提交到仓库。
+
+演示模式（`AGRI_LLM_PROVIDER=offline`）不产生外部调用，风险较低，但仍建议加基础限流。
+
+## 十一、技术选型与取舍
 
 | 选择 | 理由 |
 | --- | --- |
@@ -318,7 +366,7 @@ agri-rag-agent/
 
 ---
 
-## 十一、已知限制
+## 十二、已知限制
 
 - 知识库目前覆盖芦荟单一作物，扩展新作物需要补充文档并重建索引
 - 田间环境数据为**示例数据**（由 `scripts/make_env_data.py` 固定随机种子复现生成），并非真实监测记录；
@@ -326,6 +374,8 @@ agri-rag-agent/
 - TF-IDF 降级模式的语义泛化能力弱于真实 Embedding 模型，生产环境建议配置 BGE
 - `diagnose_leaf_image` 默认返回演示数据（仓库不附带训练权重）；接入口已支持 **YOLO(.pt) 与 ONNX(.onnx)**，放入模型即切换为真实推理，输入/输出契约与验收清单见 [`docs/MODEL.md`](docs/MODEL.md)
 - 评测集规模为 30 条，指标用于横向对比不同策略的相对优劣，不代表线上绝对水平
+- 登记用药数据已外置到 `data/products.json`，但每条的 `source` 目前为「待核实」，
+  **剂量与安全间隔期仅供演示，发布前必须由农技人员对照农药登记标签核对**
 
 **后续计划**：训练并放入叶片检测权重完成端到端诊断闭环（ONNX 接入口已就绪，见 [docs/MODEL.md](docs/MODEL.md)）·
-生成端指标（引用正确率 / 答案忠实度）· 补充多作物知识库 · 引入交叉编码器重排序
+补充多作物知识库 · 引入交叉编码器重排序 · 扩充生成端评测集并核对登记用药数据的 source 字段

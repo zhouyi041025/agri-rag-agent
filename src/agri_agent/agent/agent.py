@@ -103,24 +103,38 @@ class BaseAgent:
         检索阶段会一次性把 top_k 个片段登记进台账（LLM 需要看到带编号的上下文），
         但最终回答通常只引用其中几条。若不裁剪，溯源面板会出现正文里根本没提过的
         「幽灵引用」，也会出现 [2] 这种断号。
+
+        三重不变量：
+        1. 正文中的每个 [n] 都能在 citations 里找到对应项（无幻觉编号）；
+        2. citations 里的每个编号都在正文中出现（无幽灵引用）；
+        3. 编号按正文首次出现顺序连续重排（无断号）。
         """
         items = ledger.snapshot()
-        used = sorted({int(match) for match in re.findall(r"\[(\d+)\]", answer_text)})
         by_index = {item["index"]: item for item in items}
+        # 按正文中首次出现的顺序去重，而不是按数值排序：重排后的编号应与
+        # 用户阅读到引用标记的顺序一致。
+        used = list(dict.fromkeys(int(match) for match in re.findall(r"\[(\d+)\]", answer_text)))
         keep = [number for number in used if number in by_index]
-        if not keep or len(keep) == len(items):
-            return answer_text, items
 
-        mapping: dict[int, int] = {}
+        if not keep:
+            # 答案一个合法引用都没有：连同幻觉编号一起清掉，并返回空台账。
+            # 绝不能把「没标引用」的答案配上一堆来源，那是另一种幽灵引用。
+            return re.sub(r"\[\d+\]", "", answer_text), []
+
+        mapping: dict[int, int] = {old: new for new, old in enumerate(keep, start=1)}
         renumbered: list[dict[str, Any]] = []
-        for new_number, old_number in enumerate(keep, start=1):
-            mapping[old_number] = new_number
+        for old_number, new_number in mapping.items():
             item = dict(by_index[old_number])
             item["index"] = new_number
             renumbered.append(item)
 
-        rewritten = re.sub(r"\[(\d+)\]", lambda m: f"[{mapping.get(int(m.group(1)), int(m.group(1)))}]", answer_text)
-        return rewritten, renumbered
+        def rewrite(match: re.Match[str]) -> str:
+            number = int(match.group(1))
+            # 幻觉编号（如模型写了 [5] 但台账只有 3 条）直接从正文移除，
+            # 保证不变量 1 恒成立。
+            return f"[{mapping[number]}]" if number in mapping else ""
+
+        return re.sub(r"\[(\d+)\]", rewrite, answer_text), renumbered
 
     def answer(
         self,
@@ -282,7 +296,20 @@ class OfflineAgent(BaseAgent):
                 steps,
             )
             before = len(ledger)
-            self._execute("search_knowledge", {"query": "炭疽病 症状 识别", "top_k": 3}, ledger, steps)
+            detected = self._disease_of(text)
+            # 模型返回里可能带病害名（class / top_k.disease），优先于问题文本
+            for item in (result.data or {}).get("top_k", []):
+                name = str(item.get("disease", ""))
+                if name and name != "健康":
+                    detected = name
+                    break
+            for item in (result.data or {}).get("detections", []):
+                name = str(item.get("class", ""))
+                if name and name != "健康":
+                    detected = name
+                    break
+            disease_query = f"{detected} 症状 识别" if detected else "芦荟 病斑 症状 识别"
+            self._execute("search_knowledge", {"query": disease_query, "top_k": 3}, ledger, steps)
             answer = (
                 f"【图像诊断】\n{result.content}\n\n"
                 f"{self._format_citations(ledger, since=before, question=text)}\n\n"
@@ -294,7 +321,9 @@ class OfflineAgent(BaseAgent):
             site = self._site(text)
             result = self._execute("get_field_env", {"site_id": site, "hours": 24}, ledger, steps)
             before = len(ledger)
-            self._execute("search_knowledge", {"query": "炭疽病 发病条件", "top_k": 2}, ledger, steps)
+            detected = self._disease_of(query) or self._disease_of(text)
+            env_query = f"{detected} 发病条件" if detected else "芦荟 病害 发病条件 环境"
+            self._execute("search_knowledge", {"query": env_query, "top_k": 2}, ledger, steps)
             answer = (
                 f"【田间环境】\n{result.content}\n\n"
                 f"{self._format_citations(ledger, since=before, question=text)}"
@@ -427,6 +456,19 @@ class OfflineAgent(BaseAgent):
             "可以尝试：① 换用具体病害名称提问（如「炭疽病怎么防治」）；② 提供叶片照片做图像诊断；"
             "③ 查询田间环境数据判断病害风险。"
         )
+
+    @staticmethod
+    def _disease_of(question: str) -> str:
+        """从问题里识别出病害名，用于给后续检索构造针对性 query。
+
+        此前图像/环境分支写死检索「炭疽病」，用户问黑斑病时溯源面板却全是
+        炭疽病资料，属于会误导人的错误。识别不到就退回通用病斑查询词，
+        由检索器自己判断，而不是硬塞一个病名。
+        """
+        for name in DISEASES:
+            if name in question:
+                return name
+        return ""
 
     def _handle_dosage(self, text: str, ledger: CitationLedger, steps: list[dict[str, Any]]) -> str:
         area_match = self._AREA_RE.search(text)

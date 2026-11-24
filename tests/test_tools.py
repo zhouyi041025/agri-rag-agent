@@ -107,3 +107,38 @@ def test_diagnose_with_unloadable_onnx_falls_back(tmp_path):
     result = tool.run({"image_path": str(image)})
     assert result.ok
     assert result.data["source"] == "placeholder"
+
+
+def test_products_are_externalized_with_source_fields():
+    """用药数据应来自外置配置且每条都带来源字段，便于审计。"""
+    from agri_agent.agent.tools import PRODUCTS, PRODUCTS_META, load_products
+
+    assert PRODUCTS, "用药清单不应为空"
+    assert PRODUCTS_META.get("version"), "配置应带数据版本"
+    assert any("待核实" in str(item.get("source", "")) for item in PRODUCTS.values())
+    for name, item in PRODUCTS.items():
+        assert "source" in item, f"{name} 缺少 source 字段"
+        assert "dose_g_per_mu" in item
+
+
+def test_load_products_rejects_empty_file(tmp_path):
+    """配置损坏时要明确报错，不能静默回退到硬编码数据。"""
+    import json
+    import pytest
+    from agri_agent.agent.tools import load_products
+
+    empty = tmp_path / "products.json"
+    empty.write_text(json.dumps({"products": {}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="为空"):
+        load_products(empty)
+
+
+def test_gen_eval_metrics_are_computable(tmp_path):
+    """生成端评测的核心指标函数应能直接调用，避免脚本腐烂。"""
+    from eval.run_gen_eval import citation_correctness, refusal_correct
+
+    assert citation_correctness("回答内容[1]和[2]", [{"index": 1}, {"index": 2}]) is True
+    assert citation_correctness("回答内容[9]", [{"index": 1}]) is False
+    assert citation_correctness("无引用内容", [{"index": 1}]) is False
+    assert refusal_correct("知识库中暂未收录相关内容") is True
+    assert refusal_correct("建议您使用代森锰锌") is False

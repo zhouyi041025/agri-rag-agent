@@ -77,3 +77,21 @@ def test_follow_up_without_history_degrades_gracefully(agent):
     """没有上下文时宁可弃答，也不能猜。"""
     answer = agent.answer("那这种药要打几次？")
     assert "暂未收录" in answer.answer
+
+
+def test_image_branch_searches_detected_disease_not_hardcoded_anthracnose(agent):
+    """图像诊断的溯源检索应跟随识别出的病名，而不是写死「炭疽病」。"""
+    answer = agent.answer("帮我看看这张黑斑病的叶片照片 /tmp/leaf.jpg")
+    search_steps = [step for step in answer.steps if step["name"] == "search_knowledge"]
+    assert search_steps, "图像分支应附带知识库检索"
+    query = search_steps[0]["arguments"]["query"]
+    assert "黑斑病" in query, f"应围绕识别出的病害检索，实际 query={query}"
+
+
+def test_env_branch_searches_disease_from_question(agent):
+    """田间环境分支的溯源检索应带上问题里提到的病害。"""
+    answer = agent.answer("S2 现在环境怎么样，褐斑病会不会加重？")
+    search_steps = [step for step in answer.steps if step["name"] == "search_knowledge"]
+    assert search_steps
+    query = search_steps[0]["arguments"]["query"]
+    assert "褐斑病" in query, f"应围绕问题里的病害检索，实际 query={query}"

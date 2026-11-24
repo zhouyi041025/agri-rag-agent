@@ -142,14 +142,23 @@ ENV_THRESHOLDS = {
     "light_lux": (3000.0, 45000.0, "光照强度"),
 }
 
-PRODUCTS: dict[str, dict[str, Any]] = {
-    "代森锰锌": {"kind": "保护性杀菌剂", "dose_g_per_mu": 160, "water_l_per_mu": 45, "dilution": "600-800 倍", "safety_days": 15, "max_times": 3, "targets": ["炭疽病", "褐斑病", "黑斑病"]},
-    "多菌灵": {"kind": "内吸性杀菌剂", "dose_g_per_mu": 100, "water_l_per_mu": 45, "dilution": "800-1000 倍", "safety_days": 20, "max_times": 2, "targets": ["炭疽病", "叶枯病", "根腐病"]},
-    "苯醚甲环唑": {"kind": "三唑类内吸杀菌剂", "dose_g_per_mu": 30, "water_l_per_mu": 45, "dilution": "1500-2000 倍", "safety_days": 21, "max_times": 3, "targets": ["炭疽病", "黑斑病"]},
-    "咪鲜胺": {"kind": "咪唑类杀菌剂", "dose_g_per_mu": 50, "water_l_per_mu": 45, "dilution": "1000-1500 倍", "safety_days": 14, "max_times": 3, "targets": ["炭疽病"]},
-    "吡唑醚菌酯": {"kind": "甲氧基丙烯酸酯类杀菌剂", "dose_g_per_mu": 25, "water_l_per_mu": 45, "dilution": "2000-2500 倍", "safety_days": 14, "max_times": 3, "targets": ["炭疽病", "褐斑病"]},
-    "春雷霉素": {"kind": "农用抗生素", "dose_g_per_mu": 40, "water_l_per_mu": 45, "dilution": "1000-1200 倍", "safety_days": 10, "max_times": 4, "targets": ["软腐病", "叶枯病"]},
-}
+def load_products(path: Path | None = None) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """从外置 JSON 读取登记用药数据，返回 (products, meta)。
+
+    剂量与安全间隔期属于会影响用药安全的数据，写死在代码里既无法审计来源，
+    改一次还要发版。外置为带 source/version 字段的配置文件后，数据的
+    可追溯性和更新成本都更好；文件格式不合规时明确报错，不静默吞掉。
+    """
+    config_path = path or Path(__file__).resolve().parents[3] / "data" / "products.json"
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    products = payload.get("products") or {}
+    if not products:
+        raise ValueError(f"登记用药数据为空：{config_path}")
+    meta = {key: value for key, value in payload.items() if key != "products"}
+    return products, meta
+
+
+PRODUCTS, PRODUCTS_META = load_products()
 
 SEVERITY_FACTOR = {"轻": 0.8, "轻度": 0.8, "中": 1.0, "中度": 1.0, "重": 1.2, "重度": 1.2}
 
@@ -301,6 +310,8 @@ def make_dosage_tool() -> Tool:
         ]
         if target_note:
             lines.append(target_note)
+        source = str(info.get("source") or "未提供")
+        lines.append(f"数据来源：{source}（数据版本 {PRODUCTS_META.get('version', '未知')}）")
         lines.append("提示：以上为按登记用量推算的参考值，实际施药请以产品标签与当地植保部门指导为准。")
 
         return ToolResult(
@@ -313,6 +324,8 @@ def make_dosage_tool() -> Tool:
                 "safety_days": info["safety_days"],
                 "dilution": info["dilution"],
                 "warning": target_note,
+                "source": source,
+                "source_version": PRODUCTS_META.get("version"),
             },
         )
 
