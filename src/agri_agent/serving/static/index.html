@@ -16,8 +16,15 @@
     background: var(--panel); border-bottom: 1px solid var(--line); }
   header h1 { font-size: 16px; margin: 0; }
   header .sub { color: var(--muted); font-size: 12px; }
-  .pill { margin-left: auto; background: var(--brand-soft); color: var(--brand);
+  .pill { background: var(--brand-soft); color: var(--brand);
     padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .spacer { margin-left: auto; }
+  .mode-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 20px;
+    padding: 2px; background: #f4f7f4; }
+  .mode-btn { border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    padding: 4px 12px; border-radius: 16px; font-size: 12px; font-family: inherit; }
+  .mode-btn.active { background: var(--brand); color: #fff; font-weight: 600; }
+  .mode-btn:disabled { opacity: .4; cursor: not-allowed; }
   main { display: grid; grid-template-columns: minmax(0,1.55fr) minmax(320px,1fr);
     gap: 16px; padding: 16px 22px 24px; height: calc(100vh - 58px); }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
@@ -60,6 +67,11 @@
 <header>
   <h1>荟诊 · 芦荟病虫害智能问答与诊断 Agent</h1>
   <span class="sub">RAG 混合检索 + Function Calling 工具调用</span>
+  <span class="spacer"></span>
+  <div class="mode-switch" id="modeSwitch" title="切换 Agent 模式，对比生成式与规则式回答">
+    <button type="button" class="mode-btn active" data-mode="llm">大模型</button>
+    <button type="button" class="mode-btn" data-mode="offline">无 API</button>
+  </div>
   <span class="pill" id="status">加载中…</span>
 </header>
 <main>
@@ -88,6 +100,10 @@ const form = document.getElementById("form");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const history = [];
+let currentMode = "auto";
+let kbChunks = 0;
+let llmAvailable = false;
+let llmModel = "";
 
 const EXAMPLES = [
   "芦荟炭疽病怎么防治？",
@@ -97,11 +113,38 @@ const EXAMPLES = [
   "未来三天能打药吗？"
 ];
 
-fetch("/health").then(r => r.json()).then(d => {
+function refreshStatus() {
+  const isLlm = currentMode === "llm" || (currentMode === "auto" && llmAvailable);
   document.getElementById("status").textContent =
-    (d.agent === "llm" ? "大模型模式：" + d.llm_model : "规则降级模式（未配置 API Key）") +
-    ` · 知识块 ${d.kb.chunks}`;
+    (isLlm ? "大模型模式：" + llmModel : "规则降级模式（无 API）") + ` · 知识块 ${kbChunks}`;
+  document.querySelectorAll(".mode-btn").forEach(btn => {
+    const mode = btn.dataset.mode;
+    btn.classList.toggle("active", isLlm ? mode === "llm" : mode === "offline");
+    btn.disabled = mode === "llm" && !llmAvailable;
+  });
+}
+
+fetch("/health").then(r => r.json()).then(d => {
+  kbChunks = d.kb.chunks;
+  llmAvailable = !!d.llm_available;
+  llmModel = d.llm_model || "";
+  currentMode = llmAvailable ? "llm" : "offline";
+  refreshStatus();
 }).catch(() => { document.getElementById("status").textContent = "服务未就绪"; });
+
+document.querySelectorAll(".mode-btn").forEach(btn => {
+  btn.onclick = () => {
+    if (btn.disabled) return;
+    currentMode = btn.dataset.mode;
+    history.length = 0;
+    chatEl.innerHTML = "";
+    citeEl.className = "empty"; citeEl.textContent = "提问后显示命中的知识库片段";
+    traceEl.className = "empty"; traceEl.textContent = "提问后显示 Agent 的工具调用过程";
+    bubble(currentMode === "llm" ? "已切换到大模型模式：模型自主决定工具调用，生成自然语言回答" :
+                                  "已切换到无 API 模式：规则路由 + 知识库抽取，零 token 消耗", "bot");
+    refreshStatus();
+  };
+});
 
 EXAMPLES.forEach(text => {
   const chip = document.createElement("button");
@@ -155,7 +198,7 @@ form.addEventListener("submit", async (event) => {
   try {
     const response = await fetch("/chat/stream", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, history: history.slice(-6) })
+      body: JSON.stringify({ message, history: history.slice(-6), mode: currentMode })
     });
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

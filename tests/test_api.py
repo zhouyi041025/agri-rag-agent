@@ -98,3 +98,28 @@ def test_endpoints_work_without_lifespan():
             assert chat.json()["answer"]
 
     asyncio.run(run())
+
+
+def test_chat_mode_switch_forces_offline_agent():
+    """mode=offline 必须强制规则 Agent，即使服务端配置了 Key。"""
+    with TestClient(create_app()) as client:
+        # 默认模式随配置；显式 offline 必须是 rule-based
+        forced = client.post(
+            "/chat", json={"message": "芦荟炭疽病怎么防治？", "mode": "offline", "use_cache": False}
+        ).json()
+        assert forced["agent"] == "rule-based", f"实际 {forced['agent']}"
+        assert forced["answer"]
+        assert forced["llm_calls"] == 0
+
+
+def test_cache_isolated_between_modes():
+    """切换模式后同一问题不能命中另一模式的缓存（生成式/抽取式答案不同）。"""
+    with TestClient(create_app()) as client:
+        q = "芦荟炭疽病怎么防治？"
+        a = client.post("/chat", json={"message": q, "mode": "offline"}).json()
+        b = client.post("/chat", json={"message": q, "mode": "offline"}).json()
+        assert a["cached"] is False and b["cached"] is True, "同模式内应命中缓存"
+
+        other = client.post("/chat", json={"message": q, "mode": "llm"}).json()
+        if other.get("agent") == "llm":
+            assert other["cached"] is False, "切到另一模式不应复用缓存"

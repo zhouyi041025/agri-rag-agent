@@ -21,11 +21,16 @@ class QueryCache:
         self.misses = 0
 
     @staticmethod
-    def make_key(question: str, history: list[dict] | None = None) -> str:
+    def make_key(question: str, history: list[dict] | None = None, agent: str = "") -> str:
+        """缓存键包含问题、最近 6 轮历史与 Agent 类型。
+
+        agent 参数不可省略：前端可实时切换大模型/规则两种模式，同一问题
+        在两种模式下的答案完全不同（生成式 vs 抽取式），若不隔离会串答案。
+        """
         history_signature = "|".join(
             f"{turn.get('role')}:{str(turn.get('content', '')).strip()}" for turn in (history or [])[-6:]
         )
-        raw = f"{question.strip()}|{history_signature}"
+        raw = f"{agent}|{question.strip()}|{history_signature}"
         return hashlib.blake2b(raw.encode("utf-8"), digest_size=16).hexdigest()
 
     def get(self, key: str):

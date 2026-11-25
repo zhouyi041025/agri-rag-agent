@@ -152,7 +152,7 @@ class BaseAgent:
         try:
             cache_key = None
             if use_cache and self.cache is not None:
-                cache_key = QueryCache.make_key(question, history)
+                cache_key = QueryCache.make_key(question, history, agent=self.name)
                 hit = self.cache.get(cache_key)
                 if hit is not None:
                     # 返回副本而不是就地改标记：否则调用方手里"第一次的答案"
@@ -548,8 +548,18 @@ def build_agent(
     tools: ToolRegistry | None = None,
     llm: BaseLLM | None = None,
     cache: QueryCache | None = None,
+    force_offline: bool = False,
 ) -> BaseAgent:
+    """构建 Agent。
+
+    force_offline=True 时无条件使用规则 Agent，即使配置里有 Key——
+    用于前端实时降级对比；llm=None 仍保留原语义（按配置自动构建）。
+    """
     cfg = cfg or default_settings
+    if force_offline:
+        kb = kb or KnowledgeBase.load_or_build(cfg)
+        tools = tools or build_default_tools(kb, cfg)
+        return OfflineAgent(kb, tools, cfg, cache=cache)
     kb = kb or KnowledgeBase.load_or_build(cfg)
     tools = tools or build_default_tools(kb, cfg)
     llm = llm if llm is not None else build_llm(cfg)

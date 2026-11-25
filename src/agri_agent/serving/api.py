@@ -33,6 +33,11 @@ class ChatRequest(BaseModel):
         description="多轮历史（最多 20 条），形如 [{'role':'user','content':'...'}]",
     )
     use_cache: bool = Field(default=True, description="是否复用进程内查询缓存；评测时建议设为 false")
+    mode: str = Field(
+        default="auto",
+        pattern="^(auto|llm|offline)$",
+        description="Agent 模式：auto 按配置、llm 强制大模型、offline 强制规则降级",
+    )
 
 
 class RetrieveResponse(BaseModel):
@@ -73,10 +78,20 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="芦荟病虫害智能问答与诊断 Agent", version=APP_VERSION, lifespan=lifespan)
 
-    def _new_agent():
+    def _new_agent(mode: str = "auto"):
+        """按请求指定的模式构建 Agent。
+
+        mode=offline 时即使配置了 Key 也强制走规则 Agent，让前端可以实时
+        对比两种模式；mode=llm 时若未配置 Key 则退回规则 Agent（不会报错）。
+        """
         _ensure_state(app)
         return build_agent(
-            cfg, kb=app.state.kb, tools=app.state.tools, llm=app.state.llm, cache=app.state.cache
+            cfg,
+            kb=app.state.kb,
+            tools=app.state.tools,
+            llm=app.state.llm,
+            cache=app.state.cache,
+            force_offline=(mode == "offline"),
         )
 
     @app.get("/", include_in_schema=False)
@@ -94,6 +109,8 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             "status": "ok",
             "agent": "llm" if app.state.llm is not None else "rule-based",
             "llm_model": cfg.llm_model if app.state.llm is not None else None,
+            "llm_available": app.state.llm is not None,
+            "modes": ["llm", "offline"] if app.state.llm is not None else ["offline"],
             "kb": kb.stats,
             "tools": app.state.tools.names(),
         }
@@ -105,7 +122,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
 
     @app.post("/chat")
     async def chat(payload: ChatRequest) -> dict:
-        agent = _new_agent()
+        agent = _new_agent(payload.mode)
         try:
             answer = await asyncio.to_thread(
                 agent.answer, payload.message, payload.history, None, payload.use_cache
@@ -143,7 +160,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
 
         def work() -> None:
             try:
-                agent = _new_agent()
+                agent = _new_agent(payload.mode)
                 answer = agent.answer(
                     payload.message, payload.history, on_step=on_step, use_cache=payload.use_cache
                 )
